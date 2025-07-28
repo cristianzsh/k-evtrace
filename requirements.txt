@@ -1,0 +1,5 @@
+pyyaml
+requests
+python_evtx==0.8.1
+tqdm
+tabulate
