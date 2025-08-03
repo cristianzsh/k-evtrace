@@ -46,12 +46,17 @@ from collections import defaultdict, Counter
 
 import yaml
 import requests
+from functools import lru_cache
 from Evtx.Evtx import Evtx
 from tqdm import tqdm
 from tabulate import tabulate
 
 VERSION = "0.0.1"
 RULE_DEFS = None
+
+VT_API_URL = "https://www.virustotal.com/api/v3/files/{hash}"
+OPENTIP_API_URL = "https://opentip.kaspersky.com/api/v1/search/hash?request={hash}"
+
 
 def color_text(text, level):
     """
@@ -69,12 +74,56 @@ def color_text(text, level):
     color = color_map.get(level, '')
     return f"{color}{text}{reset}" if color else text
 
+
 def init_worker(rule_defs):
     """
     Initializes the global rule definition for each process worker.
     """
     global RULE_DEFS
     RULE_DEFS = rule_defs
+
+
+@lru_cache(maxsize=1024)
+def lookup_vt(hash_value, api_key):
+    """Fetch VT stats for a hash; return 'malicious/total' or 'N/A'."""
+    try:
+        r = requests.get(
+            VT_API_URL.format(hash=hash_value),
+            headers={"x-apikey": api_key},
+            timeout=15
+        )
+        r.raise_for_status()
+        stats = r.json()["data"]["attributes"]["last_analysis_stats"]
+        det = stats.get("malicious", 0) + stats.get("suspicious", 0)
+        tot = sum(stats.get(k, 0) for k in stats)
+        return f"{det}/{tot}"
+    except requests.HTTPError as e:
+        if e.response and e.response.status_code == 404:
+            return "N/A"
+    except Exception:
+        pass
+    return ""
+
+
+@lru_cache(maxsize=1024)
+def lookup_opentip(hash_value, api_key):
+    """Fetch OpenTIP status for a hash; return status or 'N/A'."""
+    try:
+        r = requests.get(
+            OPENTIP_API_URL.format(hash=hash_value),
+            headers={"x-api-key": api_key},
+            timeout=15
+        )
+        r.raise_for_status()
+        data = r.json()
+        return data.get("FileGeneralInfo", {}).get("FileStatus", "N/A")
+    except requests.HTTPError as e:
+        if e.response and e.response.status_code == 404:
+            return "N/A"
+    except Exception:
+        pass
+    return ""
+
 
 def build_tests(block_dict):
     """
@@ -111,6 +160,7 @@ def build_tests(block_dict):
             raise ValueError(f"Unsupported operator '{op}'")
     return tests
 
+
 def flatten_event(root):
     """
     Flattens a Windows Event XML tree into a dictionary of fields.
@@ -128,6 +178,7 @@ def flatten_event(root):
     rec['Data'] = ' '.join(texts)
     return rec
 
+
 def parse_evtx_file(evtx_path):
     """
     Parses an EVTX file and applies Sigma rules to identify matching events.
@@ -143,9 +194,6 @@ def parse_evtx_file(evtx_path):
     with Evtx(evtx_path) as log:
         records = list(log.records())
         for rec in tqdm(records, desc=os.path.basename(evtx_path), position=0, leave=True):
-            xml = rec.xml()
-            root = ET.fromstring(xml)
-            rd = flatten_event(root)
             xml = rec.xml()
             root = ET.fromstring(xml)
             rd = flatten_event(root)
@@ -210,6 +258,7 @@ def parse_evtx_file(evtx_path):
                 })
     return hits
 
+
 def load_rule(yml_path):
     """
     Loads a Sigma rule from a YAML file.
@@ -226,6 +275,7 @@ def load_rule(yml_path):
     condition = det.get('condition', ' and '.join(blocks.keys()))
     return meta, blocks, condition
 
+
 def write_csv(rows, out_fp):
     """
     Writes a list of event dictionaries to CSV format.
@@ -236,8 +286,10 @@ def write_csv(rows, out_fp):
     w = csv.DictWriter(out_fp, fieldnames=cols, quoting=csv.QUOTE_ALL)
     w.writeheader()
     for r in rows:
-        clean_row = {k: (v.replace('\n', ' ').replace('\r', ' ') if isinstance(v, str) else v) for k, v in r.items()}
+        clean_row = {k: (v.replace('\n', ' ').replace('\r', ' ') if isinstance(v, str) else v)
+                     for k, v in r.items()}
         w.writerow(clean_row)
+
 
 def extract_iocs(hits):
     """
@@ -275,6 +327,7 @@ def extract_iocs(hits):
 
     return iocs
 
+
 def vt_check_hashes(hashes, api_key):
     """
     Checks SHA-256 hashes against the VirusTotal API.
@@ -288,17 +341,21 @@ def vt_check_hashes(hashes, api_key):
             stats = r.json().get("data", {}).get("attributes", {}).get("last_analysis_stats", {})
             results[h] = f"{stats.get('malicious', 0)} malicious"
         else:
-            results[h] = f"File not found"
+            results[h] = "File not found"
     return results
+
 
 def main():
     """
     Main CLI entry point. Handles argument parsing, rule and log loading,
     parallel Sigma evaluation, result exporting (CSV), IOC extraction,
-    optional VirusTotal lookups, and terminal statistics printing.
+    optional VirusTotal/OpenTIP lookups, and terminal statistics printing.
     """
     start_time = time.time()
-    p = argparse.ArgumentParser(description="Python tool that applies Sigma rules to Kaspersky EVTX logs.")
+
+    p = argparse.ArgumentParser(
+        description="Python tool that applies Sigma rules to Kaspersky EVTX logs."
+    )
     p.add_argument('-V', '--version', action='version',
                    version=f"k-evtrace {VERSION} by Cristian Souza")
     grp_r = p.add_mutually_exclusive_group()
@@ -309,9 +366,21 @@ def main():
     grp_l.add_argument('--log', help="Single EVTX log file")
     p.add_argument('--csv', help="CSV output file")
     p.add_argument('--levels', help="Comma-separated list of severity levels to apply (e.g. emerg,crit,info)")
-    p.add_argument('--vt', action='store_true', help="Check matched hashes on VirusTotal")
+    grp_api = p.add_mutually_exclusive_group()
+    grp_api.add_argument('--vt', action='store_true',
+                         help="Check matched hashes on VirusTotal (requires VT_API_KEY)")
+    grp_api.add_argument('--opentip', action='store_true',
+                         help="Check matched hashes on Kaspersky OpenTIP (requires OPENTIP_API_KEY)")
     p.add_argument('--ioc-dump', help="Extract IOCs and save to JSON")
     args = p.parse_args()
+
+    # Validate API keys
+    if args.vt:
+        if not os.getenv("VT_API_KEY"):
+            sys.exit("[ERROR] VT_API_KEY environment variable not set")
+    if args.opentip:
+        if not os.getenv("OPENTIP_API_KEY"):
+            sys.exit("[ERROR] OPENTIP_API_KEY environment variable not set")
 
     # Use default rules directory if none specified
     if not args.rule and not args.rules:
@@ -341,25 +410,41 @@ def main():
 
     # Load rules
     rule_files = [args.rule] if args.rule else [
-        os.path.join(args.rules, f) for f in os.listdir(args.rules) if f.endswith(('.yml', 'yaml'))]
+        os.path.join(args.rules, f) for f in os.listdir(args.rules) if f.endswith(('.yml', 'yaml'))
+    ]
     rule_defs = [load_rule(rf) for rf in rule_files]
 
     if args.levels:
         allowed = {x.strip().lower() for x in args.levels.split(',')}
-        level_map = {'critical': 'crit', 'high': 'high', 'medium': 'med', 'low': 'low', 'informational': 'info', 'emergency': 'emerg'}
-        rule_defs = [r for r in rule_defs if level_map.get(r[0].get('level', '').lower(), '').lower() in allowed]
+        level_map = {
+            'critical': 'crit',
+            'high': 'high',
+            'medium': 'med',
+            'low': 'low',
+            'informational': 'info',
+            'emergency': 'emerg'
+        }
+        rule_defs = [
+            r for r in rule_defs
+            if level_map.get(r[0].get('level', '').lower(), '').lower() in allowed
+        ]
         if not rule_defs:
             sys.exit(f"[ERROR] No rules matched selected levels.")
 
     # Load logs
     evtx_files = [args.log] if args.log else [
-        os.path.join(args.logs, f) for f in os.listdir(args.logs) if f.endswith('.evtx')]
+        os.path.join(args.logs, f) for f in os.listdir(args.logs) if f.endswith('.evtx')
+    ]
     if not evtx_files:
         sys.exit("[ERROR] No EVTX files found.")
 
     # Process logs
     all_hits = []
-    with concurrent.futures.ProcessPoolExecutor(max_workers=cpu_count(), initializer=init_worker, initargs=(rule_defs,)) as pool:
+    with concurrent.futures.ProcessPoolExecutor(
+            max_workers=cpu_count(),
+            initializer=init_worker,
+            initargs=(rule_defs,)
+    ) as pool:
         for hits in pool.map(parse_evtx_file, evtx_files):
             all_hits.extend(hits)
 
@@ -376,12 +461,13 @@ def main():
     if args.ioc_dump:
         iocs = extract_iocs(all_hits)
         if args.vt:
-            api_key = os.getenv("VT_API_KEY")
-            if api_key:
-                vt_results = vt_check_hashes(iocs["hashes"], api_key)
-                iocs["vt_results"] = vt_results
-            else:
-                print("[!] VT_API_KEY not set. Skipping VirusTotal checks.")
+            vt_api_key = os.getenv("VT_API_KEY")
+            vt_results = {h: lookup_vt(h, vt_api_key) for h in iocs.get("hashes", [])}
+            iocs["vt_results"] = vt_results
+        if args.opentip:
+            ot_api_key = os.getenv("OPENTIP_API_KEY")
+            ot_results = {h: lookup_opentip(h, ot_api_key) for h in iocs.get("hashes", [])}
+            iocs["ot_results"] = ot_results
         with open(args.ioc_dump, 'w', encoding='utf-8') as f:
             json.dump({k: list(v) if isinstance(v, set) else v for k, v in iocs.items()}, f, indent=2)
         print(f"[+] IOCs saved to {args.ioc_dump}")
@@ -437,7 +523,8 @@ def main():
         if titles:
             counter = Counter(titles).most_common(5)
             for title, count in counter:
-                unified_top_rows.append((color_text(lvl.capitalize(), lvl), color_text(title, lvl), count))
+                unified_top_rows.append((color_text(lvl.capitalize(), lvl),
+                                         color_text(title, lvl), count))
 
     print(tabulate(unified_top_rows, headers=["Severity", "Rule Title", "Count"], tablefmt="grid"))
 
@@ -446,7 +533,8 @@ def main():
         print(f"\nSaved file: {args.csv} ({size_kb:.1f} KiB)")
 
     elapsed = time.time() - start_time
-    print(f"Elapsed time: {elapsed:.3f} seconds")
+    print(f"\nElapsed time: {elapsed:.3f} seconds")
+
 
 if __name__ == "__main__":
     """
