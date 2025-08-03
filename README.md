@@ -6,7 +6,7 @@ A EVTX log analyzer that uses Sigma rules to scan Kaspersky logs, extracting sec
 
 * Sigma Rule Support: Parses `.yml` rules with conditions, multiple blocks, and advanced operators.
 * IOC Extraction: Extracts hashes, IPs, URLs, domains, executables, and document names.
-* VirusTotal Integration: Optional live VT lookup for matched hashes via API key.
+* VirusTotal/OpenTIP Integration: Optional live VT/OpenTIP lookup for matched hashes via API key.
 * Hayabusa-Compatible CSV Output: Clean, structured, and easily parsable.
 
 # Requirements
@@ -67,6 +67,7 @@ python3 k-evtrace.py --rules rules/ --logs logs/ --levels high,crit --csv result
 ## Environment variables
 
 * `VT_API_KEY`: Your VirusTotal API key used for file hash lookups.
+* `OPENTIP_API_KEY`: Your Kaspersky OpenTIP API key used for file hash lookups.
 
 ## Building executables
 
