@@ -29,4 +29,5 @@ tags:
   - database_update
   - updates
   - endpoint_security
-ruletype: Hayabusa
+ruletype: Sigma
+engine: k-evtrace

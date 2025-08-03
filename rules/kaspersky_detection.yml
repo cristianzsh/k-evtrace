@@ -8,7 +8,7 @@ description: |
 author: Cristian Souza
 date: 2025-07-23
 modified: 2025-07-23
-level: emergency
+level: critical
 logsource:
   product: windows
   service: 'Kaspersky Endpoint Security'
@@ -35,4 +35,5 @@ tags:
   - detection
   - antivirus
   - hash
-ruletype: Hayabusa
+ruletype: Sigma
+engine: k-evtrace

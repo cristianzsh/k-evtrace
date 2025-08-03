@@ -27,4 +27,5 @@ tags:
   - intrusion
   - endpoint_security
   - detection
-ruletype: Hayabusa
+ruletype: Sigma
+engine: k-evtrace

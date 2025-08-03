@@ -32,4 +32,5 @@ tags:
   - evtx
   - endpoint_security
   - configuration_change
-ruletype: Hayabusa
+ruletype: Sigma
+engine: k-evtrace

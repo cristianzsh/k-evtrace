@@ -30,4 +30,5 @@ tags:
   - hash
   - endpoint_security
   - scan_complete
-ruletype: Hayabusa
+ruletype: Sigma
+engine: k-evtrace

@@ -28,4 +28,5 @@ tags:
   - endpoint_security
   - evtx
   - tampering
-ruletype: Hayabusa
+ruletype: Sigma
+engine: k-evtrace

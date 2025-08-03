@@ -27,4 +27,5 @@ tags:
   - processing
   - antivirus
   - endpoint_security
-ruletype: Hayabusa
+ruletype: Sigma
+engine: k-evtrace

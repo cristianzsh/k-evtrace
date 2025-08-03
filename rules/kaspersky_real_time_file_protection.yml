@@ -29,4 +29,5 @@ tags:
   - realtime_protection
   - endpoint_security
   - file_monitoring
-ruletype: Hayabusa
+ruletype: Sigma
+engine: k-evtrace

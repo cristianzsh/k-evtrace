@@ -32,4 +32,5 @@ tags:
   - file_analysis
   - hash
   - endpoint_security
-ruletype: Hayabusa
+ruletype: Sigma
+engine: k-evtrace
