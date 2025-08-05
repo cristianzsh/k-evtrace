@@ -48,6 +48,7 @@ python3 k-evtrace.py --rules ./rules/ --logs ./evtx_logs/ --csv output.csv --lev
 | `--logs`       | Directory containing `.evtx` logs                                              |
 | `--csv`        | Output CSV path                                                                |
 | `--levels`     | Comma-separated severity filter: `emerg`, `crit`, `high`, `med`, `low`, `info` |
+| `--opentip`    | Enable OpenTIP lookups (requires `OPENTIP_API_KEY` env variable)               |
 | `--vt`         | Enable VirusTotal lookups (requires `VT_API_KEY` env variable)                 |
 | `--ioc-dump`   | Save extracted IOCs (JSON format)                                              |
 
